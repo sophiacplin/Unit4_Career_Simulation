@@ -1,0 +1,129 @@
+const express = require('express');
+const restaurantRouter = express.Router();
+const {authenticateToken, authorizeRoles} = require('../authenticateMiddleware.js')
+const {fetchAllRestaurants, createRestaurant, fetchOwnerRestaurant, destroyRestaurant, updateRestaurant, assignOwner, checkIfOwnerOfRestaurant} = require('../db.js');
+
+//fetch all restaurants
+restaurantRouter.get('/', async(req, res, next) => {
+  try{
+    res.send(await fetchAllRestaurants());
+  }catch(err){
+    next(err);
+  }
+});
+
+//create restaurant
+restaurantRouter.post('/admin', authenticateToken, authorizeRoles(['admin']), async(req, res, next) => {
+  const image = req.body.image;
+  const name = req.body.name;
+  const category = req.body.category;
+  const phone = req.body.phone;
+  const address = req.body.address;
+  const open_time = req.body.open_time;
+  const closing_time = req.body.closing_time;
+  const owner_id = req.body.owner_id;
+
+  try{
+    res.send(await createRestaurant({image, name, category, phone, address, open_time, closing_time, owner_id}));
+  }catch(err){
+    next(err);
+  }
+});
+
+//fetch owner restaurants
+restaurantRouter.get('/users/:id', authenticateToken, authorizeRoles(['owner', 'admin']), async(req, res, next) => {
+  const owner_id = req.params.id;
+  const user_id = req.user.id;
+  const userRole = req.user.role;
+  
+  try{
+    if(owner_id !== user_id && userRole !== 'admin'){
+      res.status(403).send({message: 'You cannot access restaurants owned by others'})
+    }
+
+    const ownerRestaurant = await fetchOwnerRestaurant(owner_id);
+    if(ownerRestaurant.length > 0){
+      res.send(ownerRestaurant);
+    }else{
+      res.status(404).send({message:'No restaurant found'});
+    }
+  }catch(err){
+    next(err);
+  }
+});
+
+
+
+//update a restaurant
+restaurantRouter.patch('/:id', authenticateToken, authorizeRoles(['owner', 'admin']), async(req, res, next) => {
+  const restaurant_id = req.params.id;
+  const image = req.body.image;
+  const name = req.body.name;
+  const category = req.body.category;
+  const phone = req.body.phone;
+  const address = req.body.address;
+  const open_time = req.body.open_time;
+  const closing_time = req.body.closing_time;
+  const userRole = req.user.role;
+  const user_id = req.user.id;
+
+  try{
+    if(userRole === 'owner'){
+      const isOwner = await checkIfOwnerOfRestaurant(restaurant_id, user_id);
+      if(!isOwner){
+        return res.status(403).send({message: 'You are not authorized to update this restaurant'});
+      }
+    }
+
+    const updatedRestaurant = await updateRestaurant({image, name, category, phone, address, open_time, closing_time, restaurant_id});
+    if(updatedRestaurant){
+      res.send({Message: 'Restaurant updated successfully', updatedRestaurant});
+    }else{
+      res.status(404).send({Message: 'Restaurant not found'});
+    }
+  }catch(err){
+    next(err);
+  }
+});
+
+//assign or update owner
+restaurantRouter.patch('/:id/owner', authenticateToken, authorizeRoles(['admin']), async(req, res, next) => {
+  const restaurant_id = req.params.id;
+  const owner_id = req.body.owner_id;
+  try{
+    const assignedOwner = await assignOwner({owner_id, restaurant_id});
+    if(assignedOwner){
+      res.send(assignedOwner)
+    }else{
+      res.status(404).send({Message: 'Restaurant not found'});
+    }
+  }catch(err){
+    next(err);
+  }
+});
+
+//delete restaurant
+restaurantRouter.delete('/:id', authenticateToken, authorizeRoles(['owner', 'admin']), async(req, res, next) => {
+  const restaurant_id = req.params.id;
+  const user_id = req.user.id;
+  const userRole = req.user.role;
+  try{
+    if(userRole === 'owner'){
+      const isOwner = await checkIfOwnerOfRestaurant(restaurant_id, user_id);
+      if(!isOwner){
+        return res.status(403).send({message: 'You are not authorized to delete this restaurant'});
+      }
+    }
+
+    const deletedRestaurant = await destroyRestaurant(restaurant_id);
+    if(deletedRestaurant){
+      res.send({Message: 'Restaurant has been deleted', deletedRestaurant});
+    }else{
+      res.status(404).send({Message: 'Restaurant not found'});
+    }
+  }catch(err){
+    next(err);
+  }
+});
+
+module.exports = restaurantRouter;

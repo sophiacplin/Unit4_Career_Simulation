@@ -1,0 +1,39 @@
+const express = require('express');
+const categoryRouter = express.Router();
+const {fetchAllCategories, createCategory, destroyCategory} = require('../db.js')
+
+//fetch all category
+categoryRouter.get('/', async(req, res, next) => {
+  try{
+    res.send(await fetchAllCategories());
+  }catch(error){
+    next(error);
+  }
+});
+
+//create new category
+categoryRouter.post('/admin', async(req, res, next) => {
+  const name = req.body.name;
+  try{
+    res.send(await createCategory(name));
+  }catch(err){
+    next(err);
+  }
+});
+
+//delete category
+categoryRouter.delete('/:id', async(req, res, next) => {
+  const id = req.params.id
+  try{
+    const deletedCategory = await destroyCategory(id);
+    if(deletedCategory){
+      res.send({Message: 'Category has been deleted', deletedCategory});
+    }else{
+      res.status(404).send({message: 'Category not found'});
+    }
+  }catch(err){
+    next(err);
+  }
+})
+
+module.exports = categoryRouter;

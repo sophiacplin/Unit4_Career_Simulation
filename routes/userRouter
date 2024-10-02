@@ -1,0 +1,131 @@
+const express = require ('express');
+const userRouter = express.Router();
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const jwtSecret = process.env.JWT_SECRET || 'secret123';
+const {fetchUserWithUsername, fetchAllUsers, fetchSingleUser, createAccount, updateUserInfo, destroyUser, assignRole} = require("../db.js")
+const {authenticateToken, authorizeRoles} = require('../authenticateMiddleware.js');
+
+//change to only admin can view later
+userRouter.get('/admin', async(req, res, next) => {
+  try{
+    res.send(await (fetchAllUsers()));
+  }catch(err){
+    next(err);
+  }
+});
+
+//login route
+userRouter.post('/login', async (req, res, next) => {
+  try {
+    const username = req.body.username; 
+    const password = req.body.password;
+
+    if (!username || !password) {
+      return res.status(400).send('Username and password are required');
+    }
+    // Fetch user data from the database
+    const user = await fetchUserWithUsername(username);
+    if (!user) {
+      return res.status(401).send('Invalid username');
+    }
+    // Compare provided password with stored hashed password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).send('Invalid password');
+    }
+    console.log(user);
+    // Generate JWT token
+    const token = jwt.sign({ id: user.id, role: user.role }, jwtSecret, { expiresIn: '1h' });
+    console.log("Generated JWT:", token)
+    res.status(200).send({ token });
+  } catch (error) {
+    next(error);
+  }
+});
+
+//log out
+userRouter.post('/logout', (req, res) => {
+  res.send({message: 'You have been logged out successfully'});
+});
+
+
+//register account
+userRouter.post('/', async(req, res, next) => {
+  const username = req.body.username;
+  const password = req.body.password;
+
+  try{
+    const findUser = await fetchUserWithUsername(username)
+    if(findUser){
+      res.send("This username is taken.")
+    }else{
+      const newUser = await createAccount({username, password})
+      const token = await jwt.sign({id: newUser.id}, jwtSecret)
+      res.send(token);
+    }
+    res.send(await fetchSingleUser(req.params.id));
+  }catch(error){
+    next(error)
+  }
+});
+
+//update user info
+userRouter.patch('/:id', authenticateToken, authorizeRoles(['user', 'admin']), async(req, res, next) => {
+  const id = req.params.id;
+  const currentUserId = req.user.id;
+  const userRole = req.user.role;
+  const image = req.body.image;
+  const name = req.body.name;
+
+  try{
+
+    if(id !== currentUserId && userRole !== 'admin'){
+      return res.status(403).send({message: 'You are not authorized to update this user'});
+    }
+
+    const updatedUser = await updateUserInfo({image, name, id});
+    if(updatedUser){
+      res.send(updatedUser);
+    }else{
+      res.status(404).send({message: "User not found"});
+    }
+  }catch(error){
+    next(error)
+  };
+});
+
+//assign role
+userRouter.patch('/:id/admin', authenticateToken, authorizeRoles(['admin']), async(req, res, next) => {
+  const id = req.params.id;
+  const role = req.body.role;
+  try{
+    const updatedRole = await assignRole({role, id});
+    if(updatedRole){
+      res.send(updatedRole);
+    }else{
+      res.status(404).send({message:'User not found'});
+    }
+  }catch(err){
+    next(err)
+  }
+});
+
+//delete a user
+userRouter.delete('/:id', authenticateToken, authorizeRoles(['admin']), async(req, res, next) => {
+  const id = req.params.id;
+
+  try{
+    const deletedUser = await destroyUser(id);
+    if(deletedUser){
+      res.send({message: "this user has been deleted", deletedUser});
+    }else{
+      res.status(404).send({message: "User not found"});
+    }
+  }catch(error){
+    next(error);
+  }
+});
+
+
+module.exports = userRouter

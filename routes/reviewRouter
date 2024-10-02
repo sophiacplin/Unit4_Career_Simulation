@@ -1,0 +1,135 @@
+const express = require('express');
+const reviewRouter = express.Router();
+const {authenticateToken} = require('../authenticateMiddleware.js')
+const {createReview, fetchRestaurantReviews, fetchUserReviews, destroyReview, updateReview, fetchAllReviews, destroyReviewByUser, checkIfOwnerOfRestaurant, fetchReviewById} = require('../db.js');
+
+
+//fetch all reviews(we don't need this, delete later.)
+reviewRouter.get('/', async(req, res, next) => {
+  try{
+    res.send(await fetchAllReviews());
+  }catch(err){
+    next(err);
+  }
+});
+
+//create review
+//owner should not be able to review their own restaurant
+reviewRouter.post('/restaurants/:id', authenticateToken, async(req, res, next) => {
+  const restaurant_id = req.params.id;
+  const user_id = req.user.id;
+  const rating = req.body.rating;
+  const text = req.body.text;
+
+  try{
+    if(!text || text.trim() === ''){
+      return res.status(400).send({message:'Review text cannot be empty'})
+    }
+    if(!rating){
+      return res.status(400).send({message: 'Must enter rating'})
+    }
+
+    res.send(await createReview({restaurant_id, user_id, rating, text}));
+  }catch(err){
+    next(err);
+  }
+});
+
+
+//fetch reviews of a restaurant
+reviewRouter.get('/restaurants/:id', async(req, res, next) => {
+  const restaurant_id = req.params.id;
+  try{
+    res.send(await fetchRestaurantReviews(restaurant_id));
+  }catch(err){
+    next(err);
+  }
+});
+
+
+//fetch reviews of an user
+reviewRouter.get('/users/:id', authenticateToken, async(req, res, next) => {
+  const user_id = req.params.id;
+  const currentUserId = req.user.id;
+  const userRole = req.user.role;
+
+  try{
+    if(user_id !== currentUserId && userRole !== 'admin'){
+      return res.status(403).send({message: 'You are not authorized to view this'});
+    }
+    const userReviews = await fetchUserReviews(user_id);
+    res.send(userReviews);
+  }catch(err){
+    next(err);
+  }
+});
+
+
+//update a review by user
+reviewRouter.patch('/:id', authenticateToken, async(req, res, next) => {
+  const rating = req.body.rating;
+  const text = req.body.text;
+  const review_id = req.params.id;
+  const user_id = req.user.id;
+
+  console.log('User ID from token:', user_id);
+  console.log('Review ID:', review_id);
+
+  try{
+    const review = await fetchReviewById(review_id);
+    if(!review){
+      return res.status(404).send({message: 'Review not found'});
+    }
+
+    if(review.user_id !== user_id){
+      return res.status(403).send({message: 'You are not authorized to update this review'});
+      }
+
+    const updatedReview = await updateReview({rating, text, review_id, user_id});
+    if(updatedReview){
+      res.send(updatedReview);
+    }else{
+      res.status(403).send({message:'Failed to update review'});
+    }
+  }catch(err){
+    next(err);
+  }
+});
+
+
+//delete a review
+reviewRouter.delete('/:id', authenticateToken, async(req, res, next) => {
+  const review_id = req.params.id;
+  const user_id = req.user.id;
+  const userRole = req.user.role;
+  try{
+    const review = await fetchReviewById(review_id);
+
+    if(!review){
+      return res.status(404).send({message:'Review not found'});
+    }
+
+    if(userRole === 'user' && review.user_id !== user_id){
+      return res.status(403).send({message: 'You are not authorized to delete this review'});
+    }
+
+    if(userRole === 'owner'  && review.user_id !== user_id && review.owner_id !== user_id){
+      return res.status(403).send({message: 'You are not authorized to delete this review'});
+    }
+
+    
+    const deletedReview = await destroyReview(review_id);
+    if(deletedReview){
+      res.send({message:'This review has been deleted', deletedReview});
+    }else{
+      res.status(403).send({message:'Failed to delete review'});
+    }
+  }catch(err){
+    next(err);
+  }
+});
+
+
+
+
+module.exports = reviewRouter;
